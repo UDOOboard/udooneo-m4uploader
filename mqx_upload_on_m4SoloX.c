@@ -30,7 +30,17 @@
 #include <termios.h>
 #include <sys/types.h>
 #include <sys/mman.h>
-  
+
+#ifdef ANDROID
+#define LOG_TAG "M4Uploader"
+#include <cutils/log.h>
+#define LogDebug ALOGD
+#define LogError ALOGE
+#else
+#define LogDebug printf
+#define LogError printf
+#endif
+
 #define VERSION	"mqx_upload_on_m4SoloX 1.1.0"
 #define NAME_OF_BOARD			"UDOONeo"
 
@@ -155,7 +165,7 @@ void srcscr_unset_bit(int fd, unsigned int unset_mask) {
 void set_stack_pc(int fd, unsigned int stack, unsigned int pc) {
 	off_t target = (off_t) STACK_PC;
 	unsigned long read_result;
-	void *map_base, *virt_addr; 
+	void *map_base, *virt_addr;
 	map_base = mmap(0, SIZE_16BYTE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t) target);
 	virt_addr = (unsigned char *)map_base + (target & MAP_MASK);
 	*((unsigned long *) virt_addr) = stack;
@@ -223,7 +233,7 @@ int load_m4_fw(int fd, char *filepath, unsigned int loadaddr) {
 	size = ftell(fdf);
 	fseek(fdf, 0, SEEK_SET);
 	if (size > MAX_FILE_SIZE) {
-		printf("%s - File size too big, can't load: %d > %d \n", NAME_OF_BOARD, size, MAX_FILE_SIZE);
+		LogError("%s - File size too big, can't load: %d > %d \n", NAME_OF_BOARD, size, MAX_FILE_SIZE);
 		return -2;
 	}
 	filebuffer = (char *)malloc(size+1);
@@ -240,10 +250,10 @@ int load_m4_fw(int fd, char *filepath, unsigned int loadaddr) {
 	if (loadaddr == 0x0) {
 		loadaddr = pc & 0xFFFF0000;
 	}
-	printf("%s - FILENAME = %s; loadaddr = 0x%08x\n", NAME_OF_BOARD, filepath, loadaddr);
+	LogDebug("%s - FILENAME = %s; loadaddr = 0x%08x\n", NAME_OF_BOARD, filepath, loadaddr);
 
 	map_base = mmap(0, MAP_OCRAM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, loadaddr & ~MAP_OCRAM_MASK);
-	printf("%s - start - end (0x%08x - 0x%08x)\n", NAME_OF_BOARD, loadaddr & ~MAP_OCRAM_MASK, (loadaddr & ~MAP_OCRAM_MASK) + MAP_OCRAM_SIZE);
+	LogDebug("%s - start - end (0x%08x - 0x%08x)\n", NAME_OF_BOARD, loadaddr & ~MAP_OCRAM_MASK, (loadaddr & ~MAP_OCRAM_MASK) + MAP_OCRAM_SIZE);
 	virt_addr = (unsigned char *)map_base + (loadaddr & MAP_OCRAM_MASK);
 	memcpy(virt_addr, filebuffer, size);
 	munmap(map_base, MAP_OCRAM_SIZE);
@@ -267,20 +277,20 @@ int main(int argc, char **argv) {
 	int m4TraceFlags=0;
 	int m4Retry;
 
-	printf ("\n%s - %s\n", NAME_OF_BOARD, VERSION);
+	LogDebug("\n%s - %s\n", NAME_OF_BOARD, VERSION);
 
 	char *filepath;
 	filepath = (char *)malloc(150);
 
 	if (argc < 2) {
-		fprintf(stderr, "\n\t%s - Usage: %s <project_name> [0xLOADADDR]\n\n", NAME_OF_BOARD, argv[0]);
+		LogError("%s - Usage: %s <project_name> [0xLOADADDR]\n", NAME_OF_BOARD, argv[0]);
 		return (RETURN_CODE_ARGUMENTS_ERROR);
 	}
 
 	sprintf(filepath, "%s", argv[1]);
 
 	if(access(filepath, F_OK) == -1) {
-		fprintf(stderr, "\n\tFile %s not found.\n", argv[1]);
+		LogError("File %s not found.\n", argv[1]);
                 return RETURN_CODE_ARGUMENTS_ERROR;
 	}
 
@@ -307,19 +317,19 @@ int main(int argc, char **argv) {
 			usleep(300000);
 			m4Retry--;
 			m4TraceFlags = get_m4_trace_flag(fd);
-			printf ("%s - Waiting M4 Stop, m4TraceFlags: %08X \n", NAME_OF_BOARD, m4TraceFlags);
+			LogDebug("%s - Waiting M4 Stop, m4TraceFlags: %08X \n", NAME_OF_BOARD, m4TraceFlags);
 			if((m4TraceFlags & MSK12_SHARED_TRACE_FLAGS) != 0) {
 				m4IsStopped = 1;
-				printf ("%s - Stopped M4 sketch \n",NAME_OF_BOARD);
+				LogDebug("%s - Stopped M4 sketch \n",NAME_OF_BOARD);
 			}
 		}
 		send_m4_stop_flag(fd, 0x00);
 		if (m4IsStopped == 0) {
-			fprintf (stderr, "%s - Failed to Stop M4 sketch: reboot system ! \n",NAME_OF_BOARD);
-		    close(fd);
+			LogError("%s - Failed to Stop M4 sketch: reboot system ! \n",NAME_OF_BOARD);
+			close(fd);
 			exit (RETURN_CODE_M4STOP_FAILED);
 		}
-		usleep(300000);	// for execute _mqx_exit 
+		usleep(300000);	// for execute _mqx_exit
 	}
 	// ======================================================================
 	// end check if sketch is running
@@ -347,19 +357,19 @@ int main(int argc, char **argv) {
 	// ======================================================================
 	m4Retry=4;
 	while ((m4IsRunning == 0) && (m4Retry>0)){
-		usleep(300000); 
+		usleep(300000);
 		m4Retry--;
 		m4TraceFlags = get_m4_trace_flag(fd);
-		printf ("%s - Waiting M4 Run, m4TraceFlags: %08X \n", NAME_OF_BOARD, m4TraceFlags);
+		LogDebug("%s - Waiting M4 Run, m4TraceFlags: %08X \n", NAME_OF_BOARD, m4TraceFlags);
 		if((m4TraceFlags & (MSK6_SHARED_TRACE_FLAGS | MSK7_SHARED_TRACE_FLAGS | MSK8_SHARED_TRACE_FLAGS | MSK9_SHARED_TRACE_FLAGS)) == 
 			(MSK6_SHARED_TRACE_FLAGS | MSK7_SHARED_TRACE_FLAGS | MSK8_SHARED_TRACE_FLAGS | MSK9_SHARED_TRACE_FLAGS)) {
 			m4IsRunning = 1;
-			printf ("%s - M4 sketch is running\n", NAME_OF_BOARD);
+			LogDebug("%s - M4 sketch is running\n", NAME_OF_BOARD);
 		}
 	}
 	if (m4IsRunning == 0) {
-		fprintf (stderr, "%s - Failed to Start M4 sketch: reboot system ! \n", NAME_OF_BOARD);
-	    close(fd);
+		LogError("%s - Failed to Start M4 sketch: please reboot the board!\n", NAME_OF_BOARD);
+		close(fd);
 		exit (RETURN_CODE_M4START_FAILED);
 	}
 	// ======================================================================
