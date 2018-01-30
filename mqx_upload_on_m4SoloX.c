@@ -31,6 +31,7 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 
+#define HANDSHAKE_MSG		"0xHELLOM4"
 #ifdef ANDROID
 #define LOG_TAG "M4Uploader"
 #include <cutils/log.h>
@@ -41,7 +42,7 @@
 #define LogError printf
 #endif
 
-#define VERSION         "1.2.0"
+#define VERSION         "1.3.0"
 #define NAME_OF_BOARD   "UDOO Neo"
 
 #define MAP_SIZE        4096UL
@@ -51,7 +52,7 @@
 #define MAP_OCRAM_SIZE  512*1024
 #define MAP_OCRAM_MASK  (MAP_OCRAM_SIZE - 1)
 #define MAX_FILE_SIZE   MAP_OCRAM_SIZE
-#define MAX_RETRIES     8
+#define MAX_RETRIES     10
 
 #define ADDR_STACK_PC                   0x007F8000
 #define ADDR_SRC_SCR                    0x020D8000
@@ -150,7 +151,6 @@ void srcscr_unset_bit(int fd, unsigned int unset_mask) {
 
 void set_stack_pc(int fd, unsigned int stack, unsigned int pc) {
 	off_t target = (off_t) ADDR_STACK_PC;
-	unsigned long read_result;
 	void *map_base, *virt_addr;
 	map_base = mmap(0, SIZE_16BYTE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t) target);
 	virt_addr = (unsigned char *)map_base + (target & MAP_MASK);
@@ -161,10 +161,8 @@ void set_stack_pc(int fd, unsigned int stack, unsigned int pc) {
 }
 
 int load_m4_fw(int fd, char *filepath, unsigned int loadaddr) {
-	int n;
 	int size;
 	FILE *fdf;
-	off_t target;
 	char *filebuffer;
 	void *map_base, *virt_addr;
 	unsigned long stack, pc;
@@ -205,14 +203,51 @@ int load_m4_fw(int fd, char *filepath, unsigned int loadaddr) {
 	return size;
 }
 
+void send_rpmsg_magic() {
+	FILE *fd_ttyrpmsg;
+	fd_ttyrpmsg=fopen("/dev/ttyRPMSG", "w");
+	printf("Sending Magic string to remote processor\n");
+	fwrite(HANDSHAKE_MSG, sizeof(HANDSHAKE_MSG), 1, fd_ttyrpmsg);
+	fclose(fd_ttyrpmsg);
+}
+
+int is_m4_started(int fd) {
+	int m4TraceFlags, m4Retry=MAX_RETRIES;
+
+	while (m4Retry > 0) {
+		usleep(200000);
+		m4Retry--;
+		m4TraceFlags = get_m4_trace_flag(fd);
+		LogDebug("%s - Waiting M4 Run, m4TraceFlags: %08X \n", NAME_OF_BOARD, m4TraceFlags);
+		if ((m4TraceFlags & SKETCH_TASKS_RUNNING) == SKETCH_TASKS_RUNNING) {
+			return 1;
+		}
+	}
+	
+	m4TraceFlags = get_m4_trace_flag(fd);
+	if ((m4TraceFlags & SKETCH_RUNNING) == SKETCH_RUNNING) {
+		usleep(100000);
+		send_rpmsg_magic();
+		usleep(500000);
+	}
+
+	m4TraceFlags = get_m4_trace_flag(fd);
+	if ((m4TraceFlags & SKETCH_TASKS_RUNNING) == SKETCH_TASKS_RUNNING) {
+		return 1;
+	}
+	if ((m4TraceFlags & SKETCH_RUNNING) == SKETCH_RUNNING) {
+		return 3;
+	}
+
+	return 0;
+}
+
+
+
 int main(int argc, char **argv) {
-	int fd, n;
+	int fd, m4IsStopped = 0, m4IsRunning = 0, m4TraceFlags=0, m4Retry;
 	unsigned long loadaddr;
 	char *p;
-	char m4IsStopped = 0;
-	char m4IsRunning = 0;
-	int m4TraceFlags=0;
-	int m4Retry;
 	char *filepath = argv[1];
 
 	LogDebug("%s - MQX uploader v. %s\n", NAME_OF_BOARD, VERSION);
@@ -222,7 +257,7 @@ int main(int argc, char **argv) {
 		return (RETURN_CODE_ARGUMENTS_ERROR);
 	}
 
-	if(access(filepath, F_OK) == -1) {
+	if (access(filepath, F_OK) == -1) {
 		LogError("File %s not found.\n", argv[1]);
 		return RETURN_CODE_ARGUMENTS_ERROR;
 	}
@@ -240,7 +275,7 @@ int main(int argc, char **argv) {
 	// ======================================================================
 	if (get_m4_trace_flag(fd) != 0) {
 		reset_m4_trace_flag(fd);
-		// do stop M4 sketch command
+		// send stop M4 sketch command
 		send_m4_stop_flag(fd, 0xAA);		//(replace m4_stop tool function)
 		m4Retry=MAX_RETRIES;
 		while ((m4IsStopped == 0) && (m4Retry>0)) {
@@ -259,50 +294,33 @@ int main(int argc, char **argv) {
 			close(fd);
 			exit (RETURN_CODE_M4STOP_FAILED);
 		}
-		usleep(300000);	// for execute _mqx_exit
+		usleep(500000);	// for execute _mqx_exit
 	}
-	// ======================================================================
-	// end check if the sketch is running
-	// ======================================================================
 
+	// ======================================================================
+	// upload new firmware
+	// ======================================================================
 	srcscr_set_bit(fd, (M4c_RST));
 	set_gate_m4_clk(fd);
 	load_m4_fw(fd, filepath, loadaddr);
 	srcscr_unset_bit(fd, ~(M4c_RST));
-
+		
 	// ======================================================================
 	// check if the new sketch is running
 	// ======================================================================
-	m4Retry=MAX_RETRIES;
-	while ((m4IsRunning == 0) && (m4Retry>0)){
-		usleep(300000);
-		m4Retry--;
-		m4TraceFlags = get_m4_trace_flag(fd);
-		LogDebug("%s - Waiting M4 Run, m4TraceFlags: %08X \n", NAME_OF_BOARD, m4TraceFlags);
-		if ((m4TraceFlags & SKETCH_TASKS_RUNNING) == SKETCH_TASKS_RUNNING) {
-			m4IsRunning = 1;
-			LogDebug("%s - M4 sketch is running!\n", NAME_OF_BOARD);
-		}
-	}
-	
-	if (m4IsRunning == 0) {
-		m4TraceFlags = get_m4_trace_flag(fd);
-		if ((m4TraceFlags & SKETCH_RUNNING) == SKETCH_RUNNING) {
-			m4IsRunning = 1;
-			LogDebug("%s - WARNING: M4 sketch is running, but setup() is blocking the execution!\n", NAME_OF_BOARD);
-		}
-	}
-	
+	m4IsRunning = is_m4_started(fd);	
 	if (m4IsRunning == 0) {
 		LogError("%s - Failed to Start M4 sketch. Please try to reboot the board!\n", NAME_OF_BOARD);
 		close(fd);
-		exit (RETURN_CODE_M4START_FAILED);
+		exit(RETURN_CODE_M4START_FAILED);
+	} else {
+		if (m4IsRunning == 1) {
+			LogDebug("%s - M4 sketch is running!\n", NAME_OF_BOARD);
+		} else {
+			LogDebug("%s - WARNING: M4 sketch is running, but setup() is blocking the execution!\n", NAME_OF_BOARD);
+		}
+		close(fd);
+		exit(RETURN_CODE_OK);
 	}
-	// ======================================================================
-	// end check if the new sketch is running
-	// ======================================================================
-
-	close(fd);
-	exit (RETURN_CODE_OK);
 }
 
