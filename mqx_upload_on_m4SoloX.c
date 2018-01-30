@@ -83,7 +83,9 @@
 #define RETURN_CODE_M4STOP_FAILED       2
 #define RETURN_CODE_M4START_FAILED      3
 
-void send_m4_stop_flag(int fd, unsigned char value) {
+int fd;
+
+void send_m4_stop_flag(unsigned char value) {
 	off_t target;
 	void *map_base, *virt_addr;
 
@@ -131,7 +133,7 @@ void set_gate_m4_clk(int fd) {
 	munmap(map_base, MAP_SIZE);
 }
 
-void srcscr_set_bit(int fd, unsigned int set_mask) {
+void srcscr_set_bit(unsigned int set_mask) {
 	void *virt_addr;
 	unsigned long read_result;
 	virt_addr = mmap(0, SIZE_4BYTE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t) ADDR_SRC_SCR);
@@ -140,7 +142,7 @@ void srcscr_set_bit(int fd, unsigned int set_mask) {
 	munmap(virt_addr, SIZE_4BYTE);
 }
 
-void srcscr_unset_bit(int fd, unsigned int unset_mask) {
+void srcscr_unset_bit(unsigned int unset_mask) {
 	void *virt_addr;
 	unsigned long read_result;
 	virt_addr = mmap(0, SIZE_4BYTE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t) ADDR_SRC_SCR);
@@ -149,7 +151,7 @@ void srcscr_unset_bit(int fd, unsigned int unset_mask) {
 	munmap(virt_addr, SIZE_4BYTE);
 }
 
-void set_stack_pc(int fd, unsigned int stack, unsigned int pc) {
+void set_stack_pc(unsigned int stack, unsigned int pc) {
 	off_t target = (off_t) ADDR_STACK_PC;
 	void *map_base, *virt_addr;
 	map_base = mmap(0, SIZE_16BYTE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t) target);
@@ -160,28 +162,28 @@ void set_stack_pc(int fd, unsigned int stack, unsigned int pc) {
 	munmap(map_base, SIZE_16BYTE);
 }
 
-int load_m4_fw(int fd, char *filepath, unsigned int loadaddr) {
+int load_m4_fw(char *filepath, unsigned int loadaddr) {
 	int size;
-	FILE *fdf;
+	FILE *firmware;
 	char *filebuffer;
 	void *map_base, *virt_addr;
 	unsigned long stack, pc;
 
-	fdf = fopen(filepath, "rb");
-	fseek(fdf, 0, SEEK_END);
-	size = ftell(fdf);
-	fseek(fdf, 0, SEEK_SET);
+	firmware = fopen(filepath, "rb");
+	fseek(firmware, 0, SEEK_END);
+	size = ftell(firmware);
+	fseek(firmware, 0, SEEK_SET);
 	if (size > MAX_FILE_SIZE) {
 		LogError("%s - File size too big, can't load: %d > %d \n", NAME_OF_BOARD, size, MAX_FILE_SIZE);
 		return -2;
 	}
 	filebuffer = (char *)malloc(size+1);
-	if (size != fread(filebuffer, sizeof(char), size, fdf)) {
+	if (size != fread(filebuffer, sizeof(char), size, firmware)) {
 		free(filebuffer);
 		return -2;
 	}
 
-	fclose(fdf);
+	fclose(firmware);
 
 	stack = (filebuffer[0] | (filebuffer[1] << 8) | (filebuffer[2] << 16) | (filebuffer[3] << 24));
 	pc = (filebuffer[4] | (filebuffer[5] << 8) | (filebuffer[6] << 16) | (filebuffer[7] << 24));
@@ -197,7 +199,7 @@ int load_m4_fw(int fd, char *filepath, unsigned int loadaddr) {
 	memcpy(virt_addr, filebuffer, size);
 	munmap(map_base, MAP_OCRAM_SIZE);
 
-	set_stack_pc(fd, stack, pc);
+	set_stack_pc(stack, pc);
 	free(filebuffer);
 
 	return size;
@@ -218,7 +220,7 @@ int is_m4_started(int fd) {
 		usleep(200000);
 		m4Retry--;
 		m4TraceFlags = get_m4_trace_flag(fd);
-		LogDebug("%s - Waiting M4 Run, m4TraceFlags: %08X \n", NAME_OF_BOARD, m4TraceFlags);
+		LogDebug("%s - Waiting M4 startup, trace flags: 0x%08X \n", NAME_OF_BOARD, m4TraceFlags);
 		if ((m4TraceFlags & SKETCH_TASKS_RUNNING) == SKETCH_TASKS_RUNNING) {
 			return 1;
 		}
@@ -245,7 +247,7 @@ int is_m4_started(int fd) {
 
 
 int main(int argc, char **argv) {
-	int fd, m4IsStopped = 0, m4IsRunning = 0, m4TraceFlags=0, m4Retry;
+	int m4IsStopped = 0, m4IsRunning = 0, m4TraceFlags=0, m4Retry;
 	unsigned long loadaddr;
 	char *p;
 	char *filepath = argv[1];
@@ -276,7 +278,7 @@ int main(int argc, char **argv) {
 	if (get_m4_trace_flag(fd) != 0) {
 		reset_m4_trace_flag(fd);
 		// send stop M4 sketch command
-		send_m4_stop_flag(fd, 0xAA);		//(replace m4_stop tool function)
+		send_m4_stop_flag(0xAA);		//(replace m4_stop tool function)
 		m4Retry=MAX_RETRIES;
 		while ((m4IsStopped == 0) && (m4Retry>0)) {
 			usleep(300000);
@@ -288,7 +290,7 @@ int main(int argc, char **argv) {
 				LogDebug("%s - Stopped M4 sketch \n", NAME_OF_BOARD);
 			}
 		}
-		send_m4_stop_flag(fd, 0x00);
+		send_m4_stop_flag(0x00);
 		if (m4IsStopped == 0) {
 			LogError("%s - Failed to Stop M4 sketch: reboot system ! \n", NAME_OF_BOARD);
 			close(fd);
@@ -300,10 +302,10 @@ int main(int argc, char **argv) {
 	// ======================================================================
 	// upload new firmware
 	// ======================================================================
-	srcscr_set_bit(fd, (M4c_RST));
+	srcscr_set_bit(M4c_RST);
 	set_gate_m4_clk(fd);
-	load_m4_fw(fd, filepath, loadaddr);
-	srcscr_unset_bit(fd, ~(M4c_RST));
+	load_m4_fw(filepath, loadaddr);
+	srcscr_unset_bit(~M4c_RST);
 		
 	// ======================================================================
 	// check if the new sketch is running
