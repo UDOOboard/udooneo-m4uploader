@@ -19,69 +19,7 @@
  *
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
-#include <errno.h>
-#include <signal.h>
-#include <fcntl.h>
-#include <ctype.h>
-#include <termios.h>
-#include <sys/types.h>
-#include <sys/mman.h>
-
-#define HANDSHAKE_MSG		"0xHELLOM4"
-#ifdef ANDROID
-#define LOG_TAG "M4Uploader"
-#include <cutils/log.h>
-#define LogDebug ALOGD
-#define LogError ALOGE
-#else
-#define LogDebug printf
-#define LogError printf
-#endif
-
-#define VERSION         "1.3.0"
-#define NAME_OF_BOARD   "UDOO Neo"
-
-#define MAP_SIZE        4096UL
-#define MAP_MASK        (MAP_SIZE - 1)
-#define SIZE_4BYTE      4UL
-#define SIZE_16BYTE     16UL
-#define MAP_OCRAM_SIZE  512*1024
-#define MAP_OCRAM_MASK  (MAP_OCRAM_SIZE - 1)
-#define MAX_FILE_SIZE   MAP_OCRAM_SIZE
-#define MAX_RETRIES     10
-
-#define ADDR_STACK_PC                   0x007F8000
-#define ADDR_SRC_SCR                    0x020D8000
-#define M4c_RST                         (1 << 4)
-#define ADDR_GATE_M4_CLOCK              0x020C4074
-#define GATE_M4_CLOCK                   0x0000000C
-
-#define ADDR_SHARED_TRACE_FLAGS         0xBFF0FFF4 // address in shared RAM for M4 trace flags
-#define ADDR_SHARED_BYTE_FOR_M4STOP     0xBFF0FFFF // to force M4 sketch to secure exit
-#define TRACE_FLAG_TOOLCHAIN_STARTUP    0x00000001
-#define TRACE_FLAG_MAIN                 0x00000002
-#define TRACE_FLAG_MQX                  0x00000004
-#define TRACE_FLAG_BSP_PRE_INIT         0x00000008
-#define TRACE_FLAG_BSP_INIT             0x00000010
-#define TRACE_FLAG_MAIN_TASK            0x00000020
-#define TRACE_FLAG_EXIT_TASK            0x00000040
-#define TRACE_FLAG_ARDUINO_LOOP         0x00000080
-#define TRACE_FLAG_YIELD_LOOP           0x00000100
-#define TRACE_FLAG_MQX_MCCUART_RECEIVE  0x00000200
-#define TRACE_FLAG_MQX_UART_RECEIVE     0x00000400
-#define TRACE_FLAG_MQX_EXIT             0x00000800
-
-#define SKETCH_RUNNING                  (TRACE_FLAG_MAIN_TASK | TRACE_FLAG_EXIT_TASK)
-#define SKETCH_TASKS_RUNNING            (SKETCH_RUNNING | TRACE_FLAG_ARDUINO_LOOP | TRACE_FLAG_YIELD_LOOP)
-
-#define RETURN_CODE_OK                  0
-#define RETURN_CODE_ARGUMENTS_ERROR     1
-#define RETURN_CODE_M4STOP_FAILED       2
-#define RETURN_CODE_M4START_FAILED      3
+#include "mqx_upload_on_m4SoloX.h"
 
 int fd;
 
@@ -96,7 +34,7 @@ void send_m4_stop_flag(unsigned char value) {
 	munmap(map_base, MAP_SIZE);
 }
 
-void reset_m4_trace_flag(int fd) {
+void reset_m4_trace_flag() {
 	off_t target;
 	void *map_base, *virt_addr;
 
@@ -107,7 +45,7 @@ void reset_m4_trace_flag(int fd) {
 	munmap(map_base, MAP_SIZE);
 }
 
-int get_m4_trace_flag(int fd) {
+int get_m4_trace_flag() {
 	off_t target;
 	void *map_base, *virt_addr;
 	int value;
@@ -120,7 +58,7 @@ int get_m4_trace_flag(int fd) {
 	return (value);
 }
 
-void set_gate_m4_clk(int fd) {
+void set_gate_m4_clk() {
 	off_t target;
 	unsigned long read_result;
 	void *map_base, *virt_addr;
@@ -213,27 +151,27 @@ void send_rpmsg_magic() {
 	fclose(fd_ttyrpmsg);
 }
 
-int is_m4_started(int fd) {
+int is_m4_started() {
 	int m4TraceFlags, m4Retry=MAX_RETRIES;
 
 	while (m4Retry > 0) {
 		usleep(200000);
 		m4Retry--;
-		m4TraceFlags = get_m4_trace_flag(fd);
+		m4TraceFlags = get_m4_trace_flag();
 		LogDebug("%s - Waiting M4 startup, trace flags: 0x%08X \n", NAME_OF_BOARD, m4TraceFlags);
 		if ((m4TraceFlags & SKETCH_TASKS_RUNNING) == SKETCH_TASKS_RUNNING) {
 			return 1;
 		}
 	}
 	
-	m4TraceFlags = get_m4_trace_flag(fd);
+	m4TraceFlags = get_m4_trace_flag();
 	if ((m4TraceFlags & SKETCH_RUNNING) == SKETCH_RUNNING) {
 		usleep(100000);
 		send_rpmsg_magic();
-		usleep(500000);
+		usleep(2000000);
 	}
 
-	m4TraceFlags = get_m4_trace_flag(fd);
+	m4TraceFlags = get_m4_trace_flag();
 	if ((m4TraceFlags & SKETCH_TASKS_RUNNING) == SKETCH_TASKS_RUNNING) {
 		return 1;
 	}
@@ -275,15 +213,15 @@ int main(int argc, char **argv) {
 	// ======================================================================
 	// check if the sketch is running
 	// ======================================================================
-	if (get_m4_trace_flag(fd) != 0) {
-		reset_m4_trace_flag(fd);
+	if (get_m4_trace_flag() != 0) {
+		reset_m4_trace_flag();
 		// send stop M4 sketch command
 		send_m4_stop_flag(0xAA);		//(replace m4_stop tool function)
 		m4Retry=MAX_RETRIES;
 		while ((m4IsStopped == 0) && (m4Retry>0)) {
 			usleep(300000);
 			m4Retry--;
-			m4TraceFlags = get_m4_trace_flag(fd);
+			m4TraceFlags = get_m4_trace_flag();
 			LogDebug("%s - Waiting M4 Stop, m4TraceFlags: %08X \n", NAME_OF_BOARD, m4TraceFlags);
 			if((m4TraceFlags & TRACE_FLAG_MQX_EXIT) != 0) {
 				m4IsStopped = 1;
@@ -303,14 +241,14 @@ int main(int argc, char **argv) {
 	// upload new firmware
 	// ======================================================================
 	srcscr_set_bit(M4c_RST);
-	set_gate_m4_clk(fd);
+	set_gate_m4_clk();
 	load_m4_fw(filepath, loadaddr);
 	srcscr_unset_bit(~M4c_RST);
 		
 	// ======================================================================
 	// check if the new sketch is running
 	// ======================================================================
-	m4IsRunning = is_m4_started(fd);	
+	m4IsRunning = is_m4_started();	
 	if (m4IsRunning == 0) {
 		LogError("%s - Failed to Start M4 sketch. Please try to reboot the board!\n", NAME_OF_BOARD);
 		close(fd);
