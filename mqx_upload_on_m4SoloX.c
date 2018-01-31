@@ -20,6 +20,8 @@
  */
 
 #include "mqx_upload_on_m4SoloX.h"
+#define VERSION			"1.3.0"
+#define NAME_OF_BOARD	"UDOO Neo"
 
 int fd;
 

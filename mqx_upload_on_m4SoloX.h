@@ -41,17 +41,14 @@
 #define LogError printf
 #endif
 
-#define VERSION         "1.3.0"
-#define NAME_OF_BOARD   "UDOO Neo"
-
-#define MAP_SIZE        4096UL
-#define MAP_MASK        (MAP_SIZE - 1)
-#define SIZE_4BYTE      4UL
-#define SIZE_16BYTE     16UL
-#define MAP_OCRAM_SIZE  512*1024
-#define MAP_OCRAM_MASK  (MAP_OCRAM_SIZE - 1)
-#define MAX_FILE_SIZE   MAP_OCRAM_SIZE
-#define MAX_RETRIES     10
+#define MAP_SIZE			4096UL
+#define MAP_MASK			(MAP_SIZE - 1)
+#define SIZE_4BYTE			4UL
+#define SIZE_16BYTE			16UL
+#define MAP_OCRAM_SIZE		512*1024
+#define MAP_OCRAM_MASK		(MAP_OCRAM_SIZE - 1)
+#define MAX_FILE_SIZE		MAP_OCRAM_SIZE
+#define MAX_RETRIES			10
 #define HANDSHAKE_MSG		"0xHELLOM4"
 
 #define ADDR_STACK_PC                   0x007F8000
