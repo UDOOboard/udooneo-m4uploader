@@ -146,46 +146,141 @@ int load_m4_fw(char *filepath, unsigned int loadaddr) {
 void send_rpmsg_magic() {
 	FILE *fd_ttyrpmsg;
 	fd_ttyrpmsg=fopen("/dev/ttyRPMSG", "w");
-	printf("Sending Magic string to remote processor\n");
 	fwrite(HANDSHAKE_MSG, sizeof(HANDSHAKE_MSG), 1, fd_ttyrpmsg);
 	fclose(fd_ttyrpmsg);
 }
 
-int is_m4_started() {
-	int m4TraceFlags, m4Retry=MAX_RETRIES;
+void debugTraceFlags(int traceFlags) {
+	char str[100];
 
-	while (m4Retry > 0) {
+	if (traceFlags == 0) {
+		printf("0x00000000 => no flags set\n");
+		return;
+	}
+	strcpy(str, "");
+
+	if ((traceFlags & TRACE_FLAG_TOOLCHAIN_STARTUP) == TRACE_FLAG_TOOLCHAIN_STARTUP) {
+		strcat(str, "toolchain, ");
+	}
+	if ((traceFlags & TRACE_FLAG_MAIN) == TRACE_FLAG_MAIN) {
+		strcat(str, "main, ");
+	}
+	if ((traceFlags & TRACE_FLAG_MQX) == TRACE_FLAG_MQX) {
+		strcat(str, "mqx, ");
+	}
+	if ((traceFlags & TRACE_FLAG_BSP_PRE_INIT) == TRACE_FLAG_BSP_PRE_INIT) {
+		strcat(str, "preinit, ");
+	}
+	if ((traceFlags & TRACE_FLAG_BSP_INIT) == TRACE_FLAG_BSP_INIT) {
+		strcat(str, "init, ");
+	}
+	if ((traceFlags & TRACE_FLAG_MAIN_TASK) == TRACE_FLAG_MAIN_TASK) {
+		strcat(str, "main, ");
+	}
+	if ((traceFlags & TRACE_FLAG_EXIT_TASK) == TRACE_FLAG_EXIT_TASK) {
+		strcat(str, "exit, ");
+	}
+	if ((traceFlags & TRACE_FLAG_ARDUINO_LOOP) == TRACE_FLAG_ARDUINO_LOOP) {
+		strcat(str, "arduino loop, ");
+	}
+	if ((traceFlags & TRACE_FLAG_YIELD_LOOP) == TRACE_FLAG_YIELD_LOOP) {
+		strcat(str, "arduino yeld, ");
+	}
+	if ((traceFlags & TRACE_FLAG_MQX_RPMSGUART_RX) == TRACE_FLAG_MQX_RPMSGUART_RX) {
+		strcat(str, "rpmsg rx, ");
+	}
+	if ((traceFlags & TRACE_FLAG_MQX_UART_RX) == TRACE_FLAG_MQX_UART_RX) {
+		strcat(str, "uart rx, ");
+	}
+	if ((traceFlags & TRACE_FLAG_MQX_EXIT) == TRACE_FLAG_MQX_EXIT) {
+		strcat(str, "mqx exit, ");
+	}
+
+	str[strlen(str)-2] = '\0';
+	printf("0x%08x => %s\n", traceFlags, str);
+}
+
+int is_m4_started() {
+	int traceFlags = 0,
+		lastTraceFlags = -1,
+		retry = MAX_RETRIES;
+
+	while (retry > 0) {
 		usleep(200000);
-		m4Retry--;
-		m4TraceFlags = get_m4_trace_flag();
-		LogDebug("%s - Waiting M4 startup, trace flags: 0x%08X \n", NAME_OF_BOARD, m4TraceFlags);
-		if ((m4TraceFlags & SKETCH_TASKS_RUNNING) == SKETCH_TASKS_RUNNING) {
+		retry--;
+		traceFlags = get_m4_trace_flag();
+		if (traceFlags != lastTraceFlags) {
+			debugTraceFlags(traceFlags);
+			lastTraceFlags = traceFlags;
+		}
+
+		if ((traceFlags & SKETCH_TASKS_RUNNING) == SKETCH_TASKS_RUNNING) {
 			return 1;
 		}
 	}
 	
-	m4TraceFlags = get_m4_trace_flag();
-	if ((m4TraceFlags & SKETCH_RUNNING) == SKETCH_RUNNING) {
+	traceFlags = get_m4_trace_flag();
+	if ((traceFlags & SKETCH_RUNNING) == SKETCH_RUNNING) {
+		LogDebug("%s - M4 firmware is running, however loops are blocked!\n", NAME_OF_BOARD);
 		usleep(100000);
+		LogDebug("%s - Sending Magic string to remote processor\n", NAME_OF_BOARD);
 		send_rpmsg_magic();
 		usleep(2000000);
 	}
 
-	m4TraceFlags = get_m4_trace_flag();
-	if ((m4TraceFlags & SKETCH_TASKS_RUNNING) == SKETCH_TASKS_RUNNING) {
+	traceFlags = get_m4_trace_flag();
+	debugTraceFlags(traceFlags);
+	if ((traceFlags & SKETCH_TASKS_RUNNING) == SKETCH_TASKS_RUNNING) {
 		return 1;
 	}
-	if ((m4TraceFlags & SKETCH_RUNNING) == SKETCH_RUNNING) {
+	if ((traceFlags & SKETCH_RUNNING) == SKETCH_RUNNING) {
 		return 3;
 	}
 
 	return 0;
 }
 
+int stop_m4_firmware() {
+	int traceFlags = 0,
+		lastTraceFlags = -1,
+		m4IsStopped = 0,
+		retry = MAX_RETRIES;
 
+	reset_m4_trace_flag();
+	// send stop M4 firmware command
+	send_m4_stop_flag(0xAA);		//(replace m4_stop tool function)
+	usleep(100000);
+
+	while ((m4IsStopped == 0) && (retry>0)) {
+		traceFlags = get_m4_trace_flag();
+		if (traceFlags != lastTraceFlags) {
+			debugTraceFlags(traceFlags);
+			lastTraceFlags = traceFlags;
+		}
+		if((traceFlags & TRACE_FLAG_MQX_EXIT) != 0) {
+			m4IsStopped = 1;
+			LogDebug("%s - Stopped M4 firmware\n", NAME_OF_BOARD);
+		}
+		usleep(100000);
+		retry--;
+	}
+
+	// clean stop flag, for the next firmware
+	send_m4_stop_flag(0x00);
+	if (m4IsStopped == 0) {
+		return -1;
+	}
+
+	usleep(500000);	// for execute _mqx_exit
+	return 0;
+}
+
+int is_m4_running() {
+	return get_m4_trace_flag() != 0;
+}
 
 int main(int argc, char **argv) {
-	int m4IsStopped = 0, m4IsRunning = 0, m4TraceFlags=0, m4Retry;
+	int m4IsRunning = 0;
 	unsigned long loadaddr;
 	char *p;
 	char *filepath = argv[1];
@@ -194,7 +289,7 @@ int main(int argc, char **argv) {
 
 	if (argc < 2) {
 		LogError("%s - Usage: %s <project_name> [0xLOADADDR]\n", NAME_OF_BOARD, argv[0]);
-		return (RETURN_CODE_ARGUMENTS_ERROR);
+		return RETURN_CODE_ARGUMENTS_ERROR;
 	}
 
 	if (access(filepath, F_OK) == -1) {
@@ -211,53 +306,42 @@ int main(int argc, char **argv) {
 	fd = open("/dev/mem", O_RDWR | O_SYNC);
 
 	// ======================================================================
-	// check if the sketch is running
+	// check if the firmware is running, and try to stop it
 	// ======================================================================
-	if (get_m4_trace_flag() != 0) {
-		reset_m4_trace_flag();
-		// send stop M4 sketch command
-		send_m4_stop_flag(0xAA);		//(replace m4_stop tool function)
-		m4Retry=MAX_RETRIES;
-		while ((m4IsStopped == 0) && (m4Retry>0)) {
-			usleep(300000);
-			m4Retry--;
-			m4TraceFlags = get_m4_trace_flag();
-			LogDebug("%s - Waiting M4 Stop, m4TraceFlags: %08X \n", NAME_OF_BOARD, m4TraceFlags);
-			if((m4TraceFlags & TRACE_FLAG_MQX_EXIT) != 0) {
-				m4IsStopped = 1;
-				LogDebug("%s - Stopped M4 sketch \n", NAME_OF_BOARD);
-			}
-		}
-		send_m4_stop_flag(0x00);
-		if (m4IsStopped == 0) {
-			LogError("%s - Failed to Stop M4 sketch: reboot system ! \n", NAME_OF_BOARD);
+	if (is_m4_running()) {
+		LogDebug("%s - M4 firmware is running, stopping it\n", NAME_OF_BOARD);
+		if (stop_m4_firmware() < 0) {
+			LogError("%s - Failed to Stop M4 firmware: please reboot your system!\n", NAME_OF_BOARD);
 			close(fd);
-			exit (RETURN_CODE_M4STOP_FAILED);
+			return RETURN_CODE_M4STOP_FAILED;
 		}
-		usleep(500000);	// for execute _mqx_exit
+	} else {
+		LogDebug("%s - M4 firmware was not running\n", NAME_OF_BOARD);
 	}
 
 	// ======================================================================
 	// upload new firmware
 	// ======================================================================
+	LogDebug("%s - Uploading new M4 firmware...\n", NAME_OF_BOARD);
 	srcscr_set_bit(M4c_RST);
 	set_gate_m4_clk();
 	load_m4_fw(filepath, loadaddr);
 	srcscr_unset_bit(~M4c_RST);
+	LogDebug("%s - M4 firmware upload complete!\n", NAME_OF_BOARD);
 		
 	// ======================================================================
-	// check if the new sketch is running
+	// wait/check if the new firmware is running
 	// ======================================================================
 	m4IsRunning = is_m4_started();	
 	if (m4IsRunning == 0) {
-		LogError("%s - Failed to Start M4 sketch. Please try to reboot the board!\n", NAME_OF_BOARD);
+		LogError("%s - Failed to Start M4 firmware. Please try to reboot the board!\n", NAME_OF_BOARD);
 		close(fd);
 		exit(RETURN_CODE_M4START_FAILED);
 	} else {
 		if (m4IsRunning == 1) {
-			LogDebug("%s - M4 sketch is running!\n", NAME_OF_BOARD);
+			LogDebug("%s - M4 firmware is running!\n", NAME_OF_BOARD);
 		} else {
-			LogDebug("%s - WARNING: M4 sketch is running, but setup() is blocking the execution!\n", NAME_OF_BOARD);
+			LogDebug("%s - WARNING: M4 firmware is running, however loops are blocked!\n", NAME_OF_BOARD);
 		}
 		close(fd);
 		exit(RETURN_CODE_OK);
