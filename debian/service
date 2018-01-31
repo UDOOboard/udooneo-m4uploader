@@ -1,0 +1,14 @@
+[Unit]
+Description=UDOO M4 Autostart
+After=local-fs.target
+
+[Service]
+User=root
+Group=root
+Type=oneshot
+
+ExecStart=/usr/bin/udooneo-m4uploader /var/opt/m4/m4last.fw
+
+[Install]
+WantedBy=multi-user.target
+

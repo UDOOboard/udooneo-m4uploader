@@ -22,42 +22,26 @@
 
 # Setting Environment
 
-VERSION=0.3.0
+VERSION=2.0
 GROUP=dialout
-
-RETURN_CODE_OK=0
-RETURN_CODE_ARGUMENTS_ERROR=1
-RETURN_CODE_M4STOP_FAILED=2
-RETURN_CODE_M4START_FAILED=3
-RETURN_CODE_M4UPLOADER_FAIL=4
-RETURN_CODE_LASTSKETCH_FAIL=5
-
-FW_LAST=${FW_LAST:-/var/opt/m4/m4last.fw}
-
-unset FW_INPUT
-
-# Functions
-version() {
-  echo "v$VERSION"
-  exit $RETURN_CODE_OK
-}
+FW_LAST=/var/opt/m4/m4last.fw
+CMDLINE=/proc/cmdline
+M4DTS='/proc/device-tree/reserved-memory/m4@0x84000000/'
 
 usage() {
-# $1 text
-# $2 exitcode
-
-  [[ -n $1 ]] && echo $1
-
   cat << EOF
-Usage: $0 [option] fw_filename.bin
+Usage: $0 <command or firmware to load>
 
 UDOO Neo MQX Uploader Frontend
-Options:
-    -r,--reset  Reset M4, simply reloading last sketch
-    --version   Show version
+Valid commands:
+    -r, --reset     Reset M4, simply reloading last sketch
+    -v, --version   Show version
 
 EOF
-    exit ${2:-0}
+}
+
+version() {
+  echo "v$VERSION"
 }
 
 error() {
@@ -69,62 +53,41 @@ error() {
   exit $E_CODE
 }
 
-checkroot() {
-  if [ $(id -u) -ne 0 ]
-  then
-    error "You're not root!"
-  fi
-}
+# invalid arguments
+if [ $# -ne 1 ] ; then
+	usage
+	exit 1
+fi
 
-#Start!
+# check if user is root
+if [ $(id -u) -ne 0 ] ; then
+	error "You're not root!"
+fi
 
-#argument parsing
-while (( $# ))
-do
-  case $1 in
-    -h|--help) usage;;
-    --version) version;;
-    -r|--reset) FW_INPUT="$FW_LAST";;
-    -v) shift; VERBOSE=1;;
-    *)
-      # many files provided
-      [[ -n $FW_INPUT ]] && usage "Too many filenames!" $RETURN_CODE_ARGUMENTS_ERROR
-      FW_INPUT="$1"
-      shift ;;
-  esac
-done
+if [ ! -d $M4DTS ] ; then
+	error "M4 is disabled via device-tree, cannot load firmware!" 1
+fi
 
-# no input provided
-[[ -z $FW_INPUT ]] &&
-  if [ -t 0 ]
-  then
-    # Terminal input (keyboard) - interactive
+case $1 in
+	-h|--help) usage && exit 0;;
+	--version) version %% exit 0;;
+	-r|--reset) FW_INPUT=$FW_LAST;;
+	*) FW_INPUT=$1;;
+esac
 
-    # input not provided
-    usage "Sure you provided something?" $RETURN_CODE_ARGUMENTS_ERROR
+if [ ! -f $FW_INPUT ] ; then
+	error "File $FW_INPUT does not exits!" 1
+fi
 
-  else
-    # File or pipe input - non-interactive
+echo mqx_upload_on_m4SoloX "$FW_INPUT" || error "flash: uploading input firmware failed" 2
 
-    # create tmp file
-    FW_INPUT=`mktemp` || error "Cannot create tmp file" $RETURN_CODE_M4UPLOADER_FAIL
-    # read from stdin
-    cat > "$FW_INPUT" || error "Error receiving input file" $RETURN_CODE_M4UPLOADER_FAIL
-  fi
-
-#input not valid
-[[ ! -s $FW_INPUT ]] && usage "Binary file not valid" $RETURN_CODE_M4UPLOADER_FAIL
-
-#flash it
-mqx_upload_on_m4SoloX "$FW_INPUT" || error "flash: uploading input firmware failed"
-
-#copy binary for next reboot if different
-if [[ $FW_INPUT != "$FW_LAST" ]]
+#copy binary for next reboot
+if [[ $FW_INPUT != $FW_LAST ]]
 then
   install -m 664 -g "$GROUP" "$FW_INPUT" "$FW_LAST" ||
-    error "Error copying last bin" $RETURN_CODE_LASTSKETCH_FAIL
+    error "Error copying last bin" 3
   sync
 fi
 
-exit $RETURN_CODE_OK
+exit 0
 
