@@ -22,8 +22,6 @@
 
 # Setting Environment
 
-up=mqx_upload_on_m4SoloX
-
 VERSION=0.3.0
 GROUP=dialout
 
@@ -37,7 +35,6 @@ RETURN_CODE_LASTSKETCH_FAIL=5
 FW_LAST=${FW_LAST:-/var/opt/m4/m4last.fw}
 
 unset FW_INPUT
-unset VERBOSE
 
 # Functions
 version() {
@@ -57,7 +54,6 @@ Usage: $0 [option] fw_filename.bin
 UDOO Neo MQX Uploader Frontend
 Options:
     -r,--reset  Reset M4, simply reloading last sketch
-    -v          Verbose output
     --version   Show version
 
 EOF
@@ -65,8 +61,6 @@ EOF
 }
 
 error() {
-  #error($E_TEXT,$E_CODE)
-
   local E_TEXT=$1
   local E_CODE=$2
 
@@ -75,29 +69,11 @@ error() {
   exit $E_CODE
 }
 
-ok() {
-  #ok($OK_TEXT)
-  local OK_TEXT=$1
-  [[ -z $OK_TEXT ]] && OK_TEXT="Success!!"
-  [[ -z $OK_TEXT ]] || echo $OK_TEXT
-  exit $RETURN_CODE_OK
-}
-
 checkroot() {
   if [ $(id -u) -ne 0 ]
   then
     error "You're not root!"
   fi
-}
-
-flash() {
-  local INPUT=$1
-  [[ -z $INPUT ]] && error "flash: function require an argument" $RETURN_CODE_ARGUMENTS_ERROR
-
-  $up "$INPUT"
-  up_exit=$?
-
-  (( up_exit )) && error "flash: uploading input firmware failed" $up_exit
 }
 
 #Start!
@@ -140,12 +116,7 @@ done
 [[ ! -s $FW_INPUT ]] && usage "Binary file not valid" $RETURN_CODE_M4UPLOADER_FAIL
 
 #flash it
-if (( $VERBOSE ))
-then
-  flash "$FW_INPUT"
-else
-  flash "$FW_INPUT" 1>/dev/null
-fi
+mqx_upload_on_m4SoloX "$FW_INPUT" || error "flash: uploading input firmware failed"
 
 #copy binary for next reboot if different
 if [[ $FW_INPUT != "$FW_LAST" ]]
@@ -155,4 +126,5 @@ then
   sync
 fi
 
-ok
+exit $RETURN_CODE_OK
+
