@@ -1,3 +1,9 @@
+udooneo-m4uploader (2.0) xenial; urgency=low
+
+  * UDOOBuntu 3 support
+
+ -- Francesco Montefoschi <francesco.montefoschi@udoo.org>  Wed, 31 Jan 2018 10:59:23 +0000
+
 udooneo-m4uploader (0.3.0-1) trusty; urgency=low
 
   * Emit fail/success status

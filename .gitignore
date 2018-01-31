@@ -1,4 +1,11 @@
 mqx_upload_on_m4SoloX
+debian/*.log
+debian/*.debhelper
+debian/udooneo-m4uploader.substvars
+debian/udooneo-m4uploader/
+debian/debhelper-build-stamp
+debian/files
+
 # Object files
 *.o
 *.ko
