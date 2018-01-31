@@ -59,13 +59,8 @@ if [ $# -ne 1 ] ; then
 	exit 1
 fi
 
-# check if user is root
-if [ $(id -u) -ne 0 ] ; then
-	error "You're not root!"
-fi
-
 if [ ! -d $M4DTS ] ; then
-	error "M4 is disabled via device-tree, cannot load firmware!" 1
+	error "WARNING: M4 is disabled via device-tree, cannot load firmware!" 0
 fi
 
 case $1 in
@@ -76,10 +71,10 @@ case $1 in
 esac
 
 if [ ! -f $FW_INPUT ] ; then
-	error "File $FW_INPUT does not exits!" 1
+	error "WARNING: file $FW_INPUT does not exits!" 0
 fi
 
-echo mqx_upload_on_m4SoloX "$FW_INPUT" || error "flash: uploading input firmware failed" 2
+mqx_upload_on_m4SoloX "$FW_INPUT" || error "flash: uploading input firmware failed" 2
 
 #copy binary for next reboot
 if [[ $FW_INPUT != $FW_LAST ]]

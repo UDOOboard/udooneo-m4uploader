@@ -177,7 +177,7 @@ void debugTraceFlags(int traceFlags) {
 		strcat(str, "init, ");
 	}
 	if ((traceFlags & TRACE_FLAG_MAIN_TASK) == TRACE_FLAG_MAIN_TASK) {
-		strcat(str, "main, ");
+		strcat(str, "maintask, ");
 	}
 	if ((traceFlags & TRACE_FLAG_EXIT_TASK) == TRACE_FLAG_EXIT_TASK) {
 		strcat(str, "exit, ");
