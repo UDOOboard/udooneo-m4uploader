@@ -20,7 +20,7 @@
  */
 
 #include "mqx_upload_on_m4SoloX.h"
-#define VERSION			"1.3.0"
+#define VERSION			"2.1.0"
 #define NAME_OF_BOARD	"UDOO Neo"
 
 int fd;
@@ -153,7 +153,7 @@ void send_rpmsg_magic() {
 }
 
 void debugTraceFlags(int traceFlags) {
-	char str[100];
+	char str[200];
 
 	if (traceFlags == 0) {
 		printf("0x00000000 => no flags set\n");
@@ -161,41 +161,50 @@ void debugTraceFlags(int traceFlags) {
 	}
 	strcpy(str, "");
 
-	if ((traceFlags & TRACE_FLAG_TOOLCHAIN_STARTUP) == TRACE_FLAG_TOOLCHAIN_STARTUP) {
+	if ((traceFlags & TRACE01_TOOLCHAIN_STARTUP) == TRACE01_TOOLCHAIN_STARTUP) {
 		strcat(str, "toolchain, ");
 	}
-	if ((traceFlags & TRACE_FLAG_MAIN) == TRACE_FLAG_MAIN) {
+	if ((traceFlags & TRACE02_MAIN_CALLED) == TRACE02_MAIN_CALLED) {
 		strcat(str, "main, ");
 	}
-	if ((traceFlags & TRACE_FLAG_MQX) == TRACE_FLAG_MQX) {
+	if ((traceFlags & TRACE03_MQX_STARTED) == TRACE03_MQX_STARTED) {
 		strcat(str, "mqx, ");
 	}
-	if ((traceFlags & TRACE_FLAG_BSP_PRE_INIT) == TRACE_FLAG_BSP_PRE_INIT) {
+	if ((traceFlags & TRACE04_BSP_PRE_INIT) == TRACE04_BSP_PRE_INIT) {
 		strcat(str, "preinit, ");
 	}
-	if ((traceFlags & TRACE_FLAG_BSP_INIT) == TRACE_FLAG_BSP_INIT) {
+	if ((traceFlags & TRACE05_BSP_INIT) == TRACE05_BSP_INIT) {
 		strcat(str, "init, ");
 	}
-	if ((traceFlags & TRACE_FLAG_MAIN_TASK) == TRACE_FLAG_MAIN_TASK) {
+	if ((traceFlags & TRACE06_MAIN_TASK_RUN) == TRACE06_MAIN_TASK_RUN) {
 		strcat(str, "maintask, ");
 	}
-	if ((traceFlags & TRACE_FLAG_EXIT_TASK) == TRACE_FLAG_EXIT_TASK) {
+	if ((traceFlags & TRACE07_EXIT_TASK_RUN) == TRACE07_EXIT_TASK_RUN) {
 		strcat(str, "exit, ");
 	}
-	if ((traceFlags & TRACE_FLAG_ARDUINO_LOOP) == TRACE_FLAG_ARDUINO_LOOP) {
+	if ((traceFlags & TRACE08_ARDUINO_LOOP_TASK_RUN) == TRACE08_ARDUINO_LOOP_TASK_RUN) {
 		strcat(str, "arduino loop, ");
 	}
-	if ((traceFlags & TRACE_FLAG_YIELD_LOOP) == TRACE_FLAG_YIELD_LOOP) {
+	if ((traceFlags & TRACE09_ARDUINO_YIELD_TASK_RUN) == TRACE09_ARDUINO_YIELD_TASK_RUN) {
 		strcat(str, "arduino yeld, ");
 	}
-	if ((traceFlags & TRACE_FLAG_MQX_RPMSGUART_RX) == TRACE_FLAG_MQX_RPMSGUART_RX) {
-		strcat(str, "rpmsg rx, ");
+	if ((traceFlags & TRACE10_MCC_RX_TASK_RUN) == TRACE10_MCC_RX_TASK_RUN) {
+		strcat(str, "mcc rx, ");
 	}
-	if ((traceFlags & TRACE_FLAG_MQX_UART_RX) == TRACE_FLAG_MQX_UART_RX) {
+	if ((traceFlags & TRACE11_UART_RX_TASK_RUN) == TRACE11_UART_RX_TASK_RUN) {
 		strcat(str, "uart rx, ");
 	}
-	if ((traceFlags & TRACE_FLAG_MQX_EXIT) == TRACE_FLAG_MQX_EXIT) {
+	if ((traceFlags & TRACE12_MQX_EXIT) == TRACE12_MQX_EXIT) {
 		strcat(str, "mqx exit, ");
+	}
+	if ((traceFlags & TRACE13_RPMSG_INIT_LOCKED) == TRACE13_RPMSG_INIT_LOCKED) {
+		strcat(str, "rpmsg init, ");
+	}
+	if ((traceFlags & TRACE14_RPMSG_TX_CHANNEL) == TRACE14_RPMSG_TX_CHANNEL) {
+		strcat(str, "rpmsg tx, ");
+	}
+	if ((traceFlags & TRACE15_RPMSG_RX_TASK_RUN) == TRACE15_RPMSG_RX_TASK_RUN) {
+		strcat(str, "rpmsg rx, ");
 	}
 
 	str[strlen(str)-2] = '\0';
@@ -217,28 +226,33 @@ int is_m4_started() {
 		}
 
 		if ((traceFlags & SKETCH_TASKS_RUNNING) == SKETCH_TASKS_RUNNING) {
-			return 1;
+			// if all tasks are running, consider the sketch running
+			break;
 		}
 	}
 	
 	traceFlags = get_m4_trace_flag();
-	if ((traceFlags & SKETCH_RUNNING) == SKETCH_RUNNING) {
-		LogDebug("%s - M4 firmware is running, however loops are blocked!\n", NAME_OF_BOARD);
-		usleep(100000);
-		LogDebug("%s - Sending Magic string to remote processor\n", NAME_OF_BOARD);
-		send_rpmsg_magic();
+	if ((traceFlags & RPMSG_NEEDS_UNLOCK) != 0) {
+		// if locked, try to unlock RPMSG
+		LogDebug("%s - M4 firmware is running, however RPMSG is locked!\n", NAME_OF_BOARD);
+		LogDebug("%s - Unlocking remote processor...\n", NAME_OF_BOARD);
 		usleep(2000000);
+		send_rpmsg_magic();
+		usleep(8000000);
 	}
 
 	traceFlags = get_m4_trace_flag();
 	debugTraceFlags(traceFlags);
 	if ((traceFlags & SKETCH_TASKS_RUNNING) == SKETCH_TASKS_RUNNING) {
+		// if after unlocking RPMSG all tasks are now running, consider the sketch running
 		return 1;
 	}
-	if ((traceFlags & SKETCH_RUNNING) == SKETCH_RUNNING) {
+	if ((traceFlags & TRACE_FLAG_EXIT_TASK) == TRACE_FLAG_EXIT_TASK) {
+		// if after unlocking RPMSG only exit task is running, consider the sketch unlockable
 		return 3;
 	}
 
+	// sketch is not running
 	return 0;
 }
 
@@ -334,7 +348,7 @@ int main(int argc, char **argv) {
 	// ======================================================================
 	// wait/check if the new firmware is running
 	// ======================================================================
-	m4IsRunning = is_m4_started();	
+	m4IsRunning = is_m4_started();
 	if (m4IsRunning == 0) {
 		LogError("%s - Failed to Start M4 firmware. Please try to reboot the board!\n", NAME_OF_BOARD);
 		close(fd);
