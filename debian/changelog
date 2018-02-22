@@ -1,3 +1,15 @@
+udooneo-m4uploader (2.1.0) xenial; urgency=low
+
+  * RPMSG and MCC compatibility
+
+ -- Francesco Montefoschi <francesco.montefoschi@udoo.org>  Thu, 22 Feb 2018 10:45:44 +0000
+
+udooneo-m4uploader (2.0.1) xenial; urgency=low
+
+  * RPMSG fix
+
+ -- Francesco Montefoschi <francesco.montefoschi@udoo.org>  Fri, 02 Feb 2018 14:21:20 +0000
+
 udooneo-m4uploader (2.0) xenial; urgency=low
 
   * UDOOBuntu 3 support

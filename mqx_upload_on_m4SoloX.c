@@ -161,20 +161,24 @@ void debugTraceFlags(int traceFlags) {
 	}
 	strcpy(str, "");
 
-	if ((traceFlags & TRACE01_TOOLCHAIN_STARTUP) == TRACE01_TOOLCHAIN_STARTUP) {
-		strcat(str, "toolchain, ");
-	}
-	if ((traceFlags & TRACE02_MAIN_CALLED) == TRACE02_MAIN_CALLED) {
-		strcat(str, "main, ");
-	}
-	if ((traceFlags & TRACE03_MQX_STARTED) == TRACE03_MQX_STARTED) {
-		strcat(str, "mqx, ");
-	}
-	if ((traceFlags & TRACE04_BSP_PRE_INIT) == TRACE04_BSP_PRE_INIT) {
-		strcat(str, "preinit, ");
-	}
-	if ((traceFlags & TRACE05_BSP_INIT) == TRACE05_BSP_INIT) {
-		strcat(str, "init, ");
+	if ((traceFlags & MQX_RUNNING) == MQX_RUNNING) {
+		strcat(str, "MQX, ");
+	} else {
+		if ((traceFlags & TRACE01_TOOLCHAIN_STARTUP) == TRACE01_TOOLCHAIN_STARTUP) {
+			strcat(str, "toolchain, ");
+		}
+		if ((traceFlags & TRACE02_MAIN_CALLED) == TRACE02_MAIN_CALLED) {
+			strcat(str, "main, ");
+		}
+		if ((traceFlags & TRACE03_MQX_STARTED) == TRACE03_MQX_STARTED) {
+			strcat(str, "mqx, ");
+		}
+		if ((traceFlags & TRACE04_BSP_PRE_INIT) == TRACE04_BSP_PRE_INIT) {
+			strcat(str, "preinit, ");
+		}
+		if ((traceFlags & TRACE05_BSP_INIT) == TRACE05_BSP_INIT) {
+			strcat(str, "init, ");
+		}
 	}
 	if ((traceFlags & TRACE06_MAIN_TASK_RUN) == TRACE06_MAIN_TASK_RUN) {
 		strcat(str, "maintask, ");
@@ -247,7 +251,7 @@ int is_m4_started() {
 		// if after unlocking RPMSG all tasks are now running, consider the sketch running
 		return 1;
 	}
-	if ((traceFlags & TRACE_FLAG_EXIT_TASK) == TRACE_FLAG_EXIT_TASK) {
+	if ((traceFlags & TRACE07_EXIT_TASK_RUN) == TRACE07_EXIT_TASK_RUN) {
 		// if after unlocking RPMSG only exit task is running, consider the sketch unlockable
 		return 3;
 	}
@@ -273,7 +277,7 @@ int stop_m4_firmware() {
 			debugTraceFlags(traceFlags);
 			lastTraceFlags = traceFlags;
 		}
-		if((traceFlags & TRACE_FLAG_MQX_EXIT) != 0) {
+		if((traceFlags & TRACE12_MQX_EXIT) != 0) {
 			m4IsStopped = 1;
 			LogDebug("%s - Stopped M4 firmware\n", NAME_OF_BOARD);
 		}
@@ -339,6 +343,8 @@ int main(int argc, char **argv) {
 	// upload new firmware
 	// ======================================================================
 	LogDebug("%s - Uploading new M4 firmware...\n", NAME_OF_BOARD);
+	srcscr_set_bit(M4p_RST);
+	usleep(1000000);
 	srcscr_set_bit(M4c_RST);
 	set_gate_m4_clk();
 	load_m4_fw(filepath, loadaddr);
