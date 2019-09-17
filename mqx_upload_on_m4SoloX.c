@@ -20,10 +20,11 @@
  */
 
 #include "mqx_upload_on_m4SoloX.h"
-#define VERSION			"2.1.0"
+#define VERSION			"2.2.0"
 #define NAME_OF_BOARD	"UDOO Neo"
 
 int fd;
+int retry = 5;
 
 void send_m4_stop_flag(unsigned char value) {
 	off_t target;
@@ -145,13 +146,6 @@ int load_m4_fw(char *filepath, unsigned int loadaddr) {
 	return size;
 }
 
-void send_rpmsg_magic() {
-	FILE *fd_ttyrpmsg;
-	fd_ttyrpmsg=fopen("/dev/ttyRPMSG", "w");
-	fwrite(HANDSHAKE_MSG, sizeof(HANDSHAKE_MSG), 1, fd_ttyrpmsg);
-	fclose(fd_ttyrpmsg);
-}
-
 void debugTraceFlags(int traceFlags) {
 	char str[200];
 
@@ -234,30 +228,24 @@ int is_m4_started() {
 			break;
 		}
 	}
-	
-	traceFlags = get_m4_trace_flag();
-	if ((traceFlags & RPMSG_NEEDS_UNLOCK) != 0) {
-		// if locked, try to unlock RPMSG
-		LogDebug("%s - M4 firmware is running, however RPMSG is locked!\n", NAME_OF_BOARD);
-		LogDebug("%s - Unlocking remote processor...\n", NAME_OF_BOARD);
-		usleep(2000000);
-		send_rpmsg_magic();
-		usleep(8000000);
-	}
 
 	traceFlags = get_m4_trace_flag();
 	debugTraceFlags(traceFlags);
+
+	if ((traceFlags & TRACE16_RPMSG_FAILED) == TRACE16_RPMSG_FAILED) {
+        return SKETCH_STATE_FAILED;
+    }
 	if ((traceFlags & SKETCH_TASKS_RUNNING) == SKETCH_TASKS_RUNNING) {
 		// if after unlocking RPMSG all tasks are now running, consider the sketch running
-		return 1;
+		return SKETCH_STATE_RUNNING;
 	}
 	if ((traceFlags & TRACE07_EXIT_TASK_RUN) == TRACE07_EXIT_TASK_RUN) {
 		// if after unlocking RPMSG only exit task is running, consider the sketch unlockable
-		return 3;
+		return SKETCH_STATE_LOCKED;
 	}
 
 	// sketch is not running
-	return 0;
+	return SKETCH_STATE_NOT_RUNNING;
 }
 
 int stop_m4_firmware() {
@@ -299,31 +287,13 @@ int is_m4_running() {
 	return get_m4_trace_flag() != 0;
 }
 
-int main(int argc, char **argv) {
-	int m4IsRunning = 0;
-	unsigned long loadaddr;
-	char *p;
-	char *filepath = argv[1];
+int do_upload(char* filepath, unsigned long loadaddr) {
+    if (retry == 0) {
+        LogError("%s - Failed to Start M4 firmware. Please try to reboot the board!\n", NAME_OF_BOARD);
+        exit(RETURN_CODE_M4START_FAILED);
+    }
 
-	LogDebug("%s - MQX uploader v. %s\n", NAME_OF_BOARD, VERSION);
-
-	if (argc < 2) {
-		LogError("%s - Usage: %s <project_name> [0xLOADADDR]\n", NAME_OF_BOARD, argv[0]);
-		return RETURN_CODE_ARGUMENTS_ERROR;
-	}
-
-	if (access(filepath, F_OK) == -1) {
-		LogError("File %s not found.\n", argv[1]);
-		return RETURN_CODE_ARGUMENTS_ERROR;
-	}
-
-	if (argc == 3) {
-		loadaddr = strtoul(argv[2], &p, 16);
-	} else {
-		loadaddr = 0x0;
-	} 
-	
-	fd = open("/dev/mem", O_RDWR | O_SYNC);
+    fd = open("/dev/mem", O_RDWR | O_SYNC);
 
 	// ======================================================================
 	// check if the firmware is running, and try to stop it
@@ -350,23 +320,61 @@ int main(int argc, char **argv) {
 	load_m4_fw(filepath, loadaddr);
 	srcscr_unset_bit(~M4c_RST);
 	LogDebug("%s - M4 firmware upload complete!\n", NAME_OF_BOARD);
-		
+
 	// ======================================================================
 	// wait/check if the new firmware is running
 	// ======================================================================
-	m4IsRunning = is_m4_started();
-	if (m4IsRunning == 0) {
-		LogError("%s - Failed to Start M4 firmware. Please try to reboot the board!\n", NAME_OF_BOARD);
-		close(fd);
-		exit(RETURN_CODE_M4START_FAILED);
-	} else {
-		if (m4IsRunning == 1) {
-			LogDebug("%s - M4 firmware is running!\n", NAME_OF_BOARD);
-		} else {
-			LogDebug("%s - WARNING: M4 firmware is running, however loops are blocked!\n", NAME_OF_BOARD);
-		}
-		close(fd);
-		exit(RETURN_CODE_OK);
+	int m4IsRunning = is_m4_started();
+	close(fd);
+
+    if (m4IsRunning == SKETCH_STATE_RUNNING) {
+        LogDebug("%s - M4 firmware is running!\n", NAME_OF_BOARD);
+        return RETURN_CODE_OK;
+    } else {
+        switch (m4IsRunning) {
+    	    case SKETCH_STATE_FAILED:
+        	    LogError("%s - RPMSG init failed!\n", NAME_OF_BOARD);
+
+    	    case SKETCH_STATE_NOT_RUNNING:
+    	        LogError("%s - Failed to Start M4 firmware. Please try to reboot the board!\n", NAME_OF_BOARD);
+
+            case SKETCH_STATE_LOCKED:
+                LogDebug("%s - WARNING: M4 firmware is running, however loops are blocked!\n", NAME_OF_BOARD);
+
+            default:
+                LogError("%s - Unkown M4 core state!\n", NAME_OF_BOARD);
+    	}
+
+        retry--;
+        usleep(1000000);
+        return do_upload(filepath, loadaddr);
+    }
+}
+
+int main(int argc, char **argv) {
+	unsigned long loadaddr;
+	char *p;
+	char *filepath = argv[1];
+
+	LogDebug("%s - MQX uploader v. %s\n", NAME_OF_BOARD, VERSION);
+
+	if (argc < 2) {
+		LogError("%s - Usage: %s <project_name> [0xLOADADDR]\n", NAME_OF_BOARD, argv[0]);
+		return RETURN_CODE_ARGUMENTS_ERROR;
 	}
+
+	if (access(filepath, F_OK) == -1) {
+		LogError("File %s not found.\n", argv[1]);
+		return RETURN_CODE_ARGUMENTS_ERROR;
+	}
+
+	if (argc == 3) {
+		loadaddr = strtoul(argv[2], &p, 16);
+	} else {
+		loadaddr = 0x0;
+	} 
+	
+    int ret = do_upload(filepath, loadaddr);
+    exit(ret);
 }
 
